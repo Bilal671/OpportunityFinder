@@ -126,22 +126,44 @@ export default function App() {
     minOpportunityScore: number;
     provider: string;
   }): Promise<SearchRecord> => {
-    const res = await fetch('/api/searches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
+    try {
+      const res = await fetch('/api/searches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
 
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(errorData.error?.message || 'Failed to start search');
+      const contentType = res.headers.get('content-type') || '';
+
+      if (!res.ok) {
+        if (contentType.includes('application/json')) {
+          const errorData = await res.json().catch(() => null);
+          throw new Error(errorData?.error?.message || 'Failed to start search');
+        } else {
+          const text = await res.text().catch(() => '');
+          if (text.includes('The page') || text.includes('Gateway') || text.includes('502') || text.includes('503')) {
+            throw new Error('Search service is briefly initializing. Please retry in a moment.');
+          }
+          throw new Error(`Server returned status ${res.status}`);
+        }
+      }
+
+      if (!contentType.includes('application/json')) {
+        throw new Error('Unexpected response format from server. Please try again.');
+      }
+
+      const data = await res.json();
+      const searchRecord: SearchRecord = data.search;
+      setActiveSearch(searchRecord);
+      fetchSearches();
+      return searchRecord;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to launch search';
+      if (msg.includes('is not valid JSON') || msg.includes('Unexpected token')) {
+        throw new Error('Search service temporarily unavailable or initializing. Please retry in a moment.');
+      }
+      throw err;
     }
-
-    const data = await res.json();
-    const searchRecord: SearchRecord = data.search;
-    setActiveSearch(searchRecord);
-    fetchSearches();
-    return searchRecord;
   };
 
   // Select a business to view Dossier Modal
@@ -305,9 +327,13 @@ export default function App() {
       body: JSON.stringify(data),
     });
 
+    const contentType = res.headers.get('content-type') || '';
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || 'Failed to save business');
+      if (contentType.includes('application/json')) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'Failed to save business');
+      }
+      throw new Error(`Failed to save business (${res.status})`);
     }
 
     await fetchBusinesses();
@@ -321,9 +347,13 @@ export default function App() {
       body: JSON.stringify({ csvText }),
     });
 
+    const contentType = res.headers.get('content-type') || '';
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || 'CSV Import failed');
+      if (contentType.includes('application/json')) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'CSV Import failed');
+      }
+      throw new Error(`CSV Import failed (${res.status})`);
     }
 
     const data = await res.json();

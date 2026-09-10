@@ -587,6 +587,31 @@ app.post('/api/security/run-tests', async (req: Request, res: Response) => {
   });
 });
 
+// Explicit JSON 404 for all unhandled /api requests (prevents fallback to HTML index)
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({
+    error: {
+      code: 'NOT_FOUND',
+      message: `API endpoint not found: ${req.method} ${req.path}`,
+    },
+  });
+});
+
+// JSON error middleware for /api routes
+app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
+  if (req.path.startsWith('/api')) {
+    console.error('API Error:', err);
+    res.status(500).json({
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: err instanceof Error ? err.message : 'Internal Server Error',
+      },
+    });
+    return;
+  }
+  next(err);
+});
+
 // -------------------------------------------------------------
 // 9. VITE SPA MIDDLEWARE FOR SERVING FRONTEND
 // -------------------------------------------------------------

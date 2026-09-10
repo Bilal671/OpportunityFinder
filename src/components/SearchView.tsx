@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search,
   MapPin,
@@ -10,9 +10,22 @@ import {
   AlertCircle,
   Database,
   ArrowRight,
-  RefreshCw,
+  Globe,
+  Layers,
+  Edit3,
+  ListFilter,
 } from 'lucide-react';
 import { SearchRecord, SearchStage } from '../types';
+import {
+  INDUSTRY_CATEGORY_GROUPS,
+  ALL_PREDEFINED_CATEGORIES,
+  POPULAR_CATEGORY_SHORTCUTS,
+  PREDEFINED_COUNTRIES_DATA,
+  getCitiesForCountry,
+  getDefaultCityForCountry,
+  getPopularCitiesForCountry,
+  getCountryLocation,
+} from '../data/categoriesAndLocations';
 
 interface SearchViewProps {
   onExecuteSearch: (params: {
@@ -36,8 +49,14 @@ export const SearchView: React.FC<SearchViewProps> = ({
   onViewResults,
 }) => {
   const [country, setCountry] = useState('Germany');
+  const [isCustomCountry, setIsCustomCountry] = useState(false);
+
   const [city, setCity] = useState('Frankfurt am Main');
+  const [isCustomCity, setIsCustomCity] = useState(false);
+
   const [category, setCategory] = useState('Dentist');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+
   const [radiusKm, setRadiusKm] = useState(20);
   const [keywords, setKeywords] = useState('');
   const [minOpportunityScore, setMinOpportunityScore] = useState(60);
@@ -45,21 +64,85 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!city || !category) {
-      setError('City and Category are required fields.');
+  // Available cities dynamically derived from country selection
+  const currentCities = useMemo(() => {
+    return getCitiesForCountry(country);
+  }, [country]);
+
+  // Popular city shortcuts for selected country
+  const popularCities = useMemo(() => {
+    return getPopularCitiesForCountry(country);
+  }, [country]);
+
+  // Handle country selection
+  const handleCountrySelect = (selectedCountry: string) => {
+    if (selectedCountry === '__CUSTOM__') {
+      setIsCustomCountry(true);
+      setIsCustomCity(true);
+      setCountry('');
+      setCity('');
       return;
     }
+
+    setIsCustomCountry(false);
+    setCountry(selectedCountry);
+
+    // Auto-update to default city for the chosen country
+    const newDefaultCity = getDefaultCityForCountry(selectedCountry);
+    setCity(newDefaultCity);
+    setIsCustomCity(false);
+  };
+
+  // Handle city selection
+  const handleCitySelect = (selectedCity: string) => {
+    if (selectedCity === '__CUSTOM__') {
+      setIsCustomCity(true);
+      setCity('');
+      return;
+    }
+    setIsCustomCity(false);
+    setCity(selectedCity);
+  };
+
+  // Handle category selection
+  const handleCategorySelect = (selectedCat: string) => {
+    if (selectedCat === '__CUSTOM__') {
+      setIsCustomCategory(true);
+      setCategory('');
+      return;
+    }
+    setIsCustomCategory(false);
+    setCategory(selectedCat);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCountry = country.trim();
+    const cleanCity = city.trim();
+    const cleanCat = category.trim();
+
+    if (!cleanCountry) {
+      setError('Please select or specify a Country.');
+      return;
+    }
+    if (!cleanCity) {
+      setError('Please select or specify a City / Region.');
+      return;
+    }
+    if (!cleanCat) {
+      setError('Please select or specify an Industry / Business Category.');
+      return;
+    }
+
     setError(null);
     setIsSubmitting(true);
 
     try {
       await onExecuteSearch({
-        country,
-        city,
+        country: cleanCountry,
+        city: cleanCity,
         radiusKm,
-        category,
+        category: cleanCat,
         keywords: keywords.trim() ? keywords : undefined,
         minOpportunityScore,
         provider,
@@ -87,6 +170,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
     ? STAGES.findIndex((s) => s.id === activeSearch.stage)
     : -1;
 
+  // Check if current city is in the predefined list for this country
+  const isCityInPredefinedList = currentCities.includes(city);
+
+  // Check if current category is in predefined list
+  const isCategoryInPredefinedList = ALL_PREDEFINED_CATEGORIES.includes(category);
+
   return (
     <div className="space-y-8">
       {/* Search Header */}
@@ -110,72 +199,253 @@ export const SearchView: React.FC<SearchViewProps> = ({
               </div>
             )}
 
-            {/* Row 1: Country & City */}
+            {/* Row 1: Country & City / Region */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                  Country
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value)}
-                    placeholder="e.g. Germany, United Kingdom, USA"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-                    required
-                  />
-                </div>
-              </div>
-
+              {/* Country Selection */}
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
-                  <span>City / Region</span>
-                  <span className="text-[11px] text-indigo-400 cursor-pointer" onClick={() => setCity('Frankfurt am Main')}>
-                    e.g. Frankfurt
+                  <span className="flex items-center gap-1.5">
+                    <Globe className="h-3.5 w-3.5 text-indigo-400" />
+                    Country
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomCountry(!isCustomCountry);
+                      if (!isCustomCountry) {
+                        setIsCustomCity(true);
+                      }
+                    }}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+                  >
+                    {isCustomCountry ? (
+                      <>
+                        <ListFilter className="h-3 w-3" />
+                        Select list
+                      </>
+                    ) : (
+                      <>
+                        <Edit3 className="h-3 w-3" />
+                        Custom
+                      </>
+                    )}
+                  </button>
                 </label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    placeholder="e.g. Frankfurt, Berlin, Munich"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-                    required
-                  />
-                </div>
+
+                {!isCustomCountry ? (
+                  <select
+                    id="search-country-select"
+                    value={country}
+                    onChange={(e) => handleCountrySelect(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {PREDEFINED_COUNTRIES_DATA.map((c) => (
+                      <option key={c.country} value={c.country}>
+                        {c.flag} {c.country}
+                      </option>
+                    ))}
+                    <option value="__CUSTOM__">🌐 Other Country (Type custom...)</option>
+                  </select>
+                ) : (
+                  <div className="relative">
+                    <input
+                      id="search-country-custom-input"
+                      type="text"
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value)}
+                      placeholder="Enter country (e.g. Sweden, New Zealand)"
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                )}
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Select a country to auto-populate regional cities.
+                </p>
+              </div>
+
+              {/* City / Region Selection */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-indigo-400" />
+                    City / Region
+                  </span>
+                  {!isCustomCountry && currentCities.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomCity(!isCustomCity)}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+                    >
+                      {isCustomCity ? (
+                        <>
+                          <ListFilter className="h-3 w-3" />
+                          Predefined list
+                        </>
+                      ) : (
+                        <>
+                          <Edit3 className="h-3 w-3" />
+                          Custom city
+                        </>
+                      )}
+                    </button>
+                  )}
+                </label>
+
+                {!isCustomCity && currentCities.length > 0 ? (
+                  <select
+                    id="search-city-select"
+                    value={isCityInPredefinedList ? city : '__CUSTOM__'}
+                    onChange={(e) => handleCitySelect(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {!isCityInPredefinedList && city && (
+                      <option value={city}>{city} (Current)</option>
+                    )}
+                    {currentCities.map((cityName) => (
+                      <option key={cityName} value={cityName}>
+                        {cityName}
+                      </option>
+                    ))}
+                    <option value="__CUSTOM__">+ Enter custom city / town...</option>
+                  </select>
+                ) : (
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                    <input
+                      id="search-city-custom-input"
+                      type="text"
+                      value={city}
+                      onChange={(e) => setCity(e.target.value)}
+                      placeholder={`Enter city or municipality in ${country || 'target region'}`}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                )}
+
+                {/* Popular City Quick Chips for Selected Country */}
+                {popularCities.length > 0 && !isCustomCountry && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Top:</span>
+                    {popularCities.map((pCity) => (
+                      <button
+                        key={pCity}
+                        type="button"
+                        onClick={() => {
+                          setCity(pCity);
+                          setIsCustomCity(false);
+                        }}
+                        className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                          city === pCity
+                            ? 'bg-indigo-600 text-white font-semibold'
+                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                        }`}
+                      >
+                        {pCity}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Row 2: Category & Radius */}
+            {/* Row 2: Industry / Business Category Selection & Radius */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Category Selection */}
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
-                  <span>Industry / Business Category</span>
-                  <span className="text-[11px] text-zinc-500">Target niche</span>
+                  <span className="flex items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-indigo-400" />
+                    Industry / Business Category
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsCustomCategory(!isCustomCategory)}
+                    className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1 transition-colors"
+                  >
+                    {isCustomCategory ? (
+                      <>
+                        <ListFilter className="h-3 w-3" />
+                        Predefined niches
+                      </>
+                    ) : (
+                      <>
+                        <Edit3 className="h-3 w-3" />
+                        Custom niche
+                      </>
+                    )}
+                  </button>
                 </label>
-                <div className="relative">
-                  <Tag className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-                  <input
-                    type="text"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    placeholder="e.g. Dentist, Roofing Contractor, Law Firm"
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
-                    required
-                  />
+
+                {!isCustomCategory ? (
+                  <select
+                    id="search-category-select"
+                    value={isCategoryInPredefinedList ? category : '__CUSTOM__'}
+                    onChange={(e) => handleCategorySelect(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
+                  >
+                    {!isCategoryInPredefinedList && category && (
+                      <option value={category}>{category} (Custom Selection)</option>
+                    )}
+                    {INDUSTRY_CATEGORY_GROUPS.map((group) => (
+                      <optgroup key={group.name} label={group.name}>
+                        {group.categories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    <option value="__CUSTOM__">+ Enter custom industry / niche...</option>
+                  </select>
+                ) : (
+                  <div className="relative">
+                    <Tag className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
+                    <input
+                      id="search-category-custom-input"
+                      type="text"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      placeholder="e.g. Dentist, Roofer, Orthodontist, Law Firm"
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-950 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                )}
+
+                {/* Popular Category Shortcuts */}
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Popular:</span>
+                  {POPULAR_CATEGORY_SHORTCUTS.slice(0, 6).map((catName) => (
+                    <button
+                      key={catName}
+                      type="button"
+                      onClick={() => {
+                        setCategory(catName);
+                        setIsCustomCategory(false);
+                      }}
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors ${
+                        category === catName
+                          ? 'bg-indigo-600 text-white font-semibold'
+                          : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+                      }`}
+                    >
+                      {catName}
+                    </button>
+                  ))}
                 </div>
               </div>
 
+              {/* Radius */}
               <div>
                 <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
                   <span>Search Radius: {radiusKm} km</span>
-                  <span className="text-[11px] text-zinc-500">Surrounding area</span>
+                  <span className="text-[11px] text-zinc-500">Surrounding metropolitan zone</span>
                 </label>
                 <div className="pt-2">
                   <input
+                    id="search-radius-slider"
                     type="range"
                     min="5"
                     max="100"
@@ -184,6 +454,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     onChange={(e) => setRadiusKm(Number(e.target.value))}
                     className="w-full accent-indigo-500"
                   />
+                </div>
+                <div className="flex justify-between text-[10px] text-zinc-500 mt-1">
+                  <span>5 km (City Center)</span>
+                  <span>25 km (Metro Area)</span>
+                  <span>100 km (Regional)</span>
                 </div>
               </div>
             </div>
@@ -196,11 +471,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
                   Discovery Provider
                 </label>
                 <select
+                  id="search-provider-select"
                   value={provider}
                   onChange={(e) => setProvider(e.target.value)}
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="licensed">Licensed Business Registry (Frankfurt/Official)</option>
+                  <option value="licensed">Licensed Business Registry (Official/Licensed Data)</option>
                   <option value="open_data">Open Community Data Provider (OSM/OpenData)</option>
                   <option value="mock">Development Mock Provider (Offline Testing)</option>
                   <option value="google_places_official">Google Places API (Official API)</option>
@@ -220,6 +496,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 </label>
                 <div className="pt-2">
                   <input
+                    id="search-min-opp-slider"
                     type="range"
                     min="0"
                     max="90"
@@ -230,7 +507,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                   />
                 </div>
                 <p className="mt-1 text-[11px] text-zinc-500">
-                  Focus on highest-value agency prospects
+                  Focuses scanner on high-value digital agency targets
                 </p>
               </div>
             </div>
@@ -238,6 +515,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
             {/* Submit Button */}
             <div className="pt-3 border-t border-zinc-800 flex justify-end">
               <button
+                id="execute-search-btn"
                 type="submit"
                 disabled={isSubmitting || activeSearch?.status === 'PROCESSING'}
                 className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50 transition-colors"
@@ -284,7 +562,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
                         : `Executing: ${activeSearch.stage}`}
                     </h3>
                     <p className="text-xs text-zinc-400">
-                      Targeting {activeSearch.params.category} in {activeSearch.params.city}
+                      Targeting {activeSearch.params.category} in {activeSearch.params.city} ({activeSearch.params.country})
                     </p>
                   </div>
                 </div>
@@ -353,6 +631,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
               {activeSearch.status === 'COMPLETED' && (
                 <div className="pt-3 border-t border-zinc-800 flex justify-end">
                   <button
+                    id="view-discovered-leads-btn"
                     onClick={onViewResults}
                     className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-medium text-white hover:bg-emerald-500 transition-colors"
                   >
@@ -377,9 +656,12 @@ export const SearchView: React.FC<SearchViewProps> = ({
                   <div
                     key={s.id}
                     onClick={() => {
+                      setCountry(s.params.country);
                       setCity(s.params.city);
                       setCategory(s.params.category);
-                      setCountry(s.params.country);
+                      setIsCustomCountry(false);
+                      setIsCustomCity(false);
+                      setIsCustomCategory(false);
                     }}
                     className="p-2.5 rounded-lg border border-zinc-800 hover:border-zinc-700 bg-zinc-950/40 cursor-pointer text-xs space-y-1 group transition-colors"
                   >
