@@ -15,6 +15,7 @@ import { Business, Lead } from './src/types';
 const app = express();
 const PORT = 3000;
 
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -167,20 +168,21 @@ app.get('/api/auth/session', (req: Request, res: Response) => {
 // 3. SEARCH & DISCOVERY ENDPOINTS
 // -------------------------------------------------------------
 app.post('/api/searches', async (req: Request, res: Response) => {
-  const { userId, workspaceId } = getAuthContext(req);
-  const clientIp = req.ip || '127.0.0.1';
-
-  const rate = checkRateLimit(clientIp, 'search');
-  if (!rate.allowed) {
-    return res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Search rate limit reached. Please wait a moment.' } });
-  }
-
-  const { country, city, radiusKm, category, keywords, minOpportunityScore, provider } = req.body;
-  if (!city || !category) {
-    return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'City and Category are required.' } });
-  }
-
   try {
+    const { workspaceId } = getAuthContext(req);
+    const clientIp = req.ip || '127.0.0.1';
+
+    const rate = checkRateLimit(clientIp, 'search');
+    if (!rate.allowed) {
+      return res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Search rate limit reached. Please wait a moment.' } });
+    }
+
+    const body = req.body || {};
+    const { country, city, radiusKm, category, keywords, minOpportunityScore, provider } = body;
+    if (!city || !category) {
+      return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'City and Category are required.' } });
+    }
+
     const searchRecord = await discoveryService.startSearch(workspaceId, {
       country: country || 'Germany',
       city,
@@ -191,10 +193,11 @@ app.post('/api/searches', async (req: Request, res: Response) => {
       provider,
     });
 
-    res.json({ search: searchRecord });
+    return res.json({ search: searchRecord });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Search initialization error';
-    res.status(400).json({ error: { code: 'SEARCH_FAILED', message: msg } });
+    console.error('Search route error:', err);
+    return res.status(400).json({ error: { code: 'SEARCH_FAILED', message: msg } });
   }
 });
 
@@ -588,7 +591,7 @@ app.post('/api/security/run-tests', async (req: Request, res: Response) => {
 });
 
 // Explicit JSON 404 for all unhandled /api requests (prevents fallback to HTML index)
-app.all('/api/*', (req: Request, res: Response) => {
+app.all(['/api', '/api/*'], (req: Request, res: Response) => {
   res.status(404).json({
     error: {
       code: 'NOT_FOUND',
@@ -599,7 +602,7 @@ app.all('/api/*', (req: Request, res: Response) => {
 
 // JSON error middleware for /api routes
 app.use((err: unknown, req: Request, res: Response, next: express.NextFunction) => {
-  if (req.path.startsWith('/api')) {
+  if (req.path.startsWith('/api') || req.originalUrl.startsWith('/api')) {
     console.error('API Error:', err);
     res.status(500).json({
       error: {

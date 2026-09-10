@@ -14,6 +14,8 @@ import {
   Layers,
   Edit3,
   ListFilter,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import { SearchRecord, SearchStage } from '../types';
 import {
@@ -76,6 +78,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   // Handle country selection
   const handleCountrySelect = (selectedCountry: string) => {
+    setError(null);
     if (selectedCountry === '__CUSTOM__') {
       setIsCustomCountry(true);
       setIsCustomCity(true);
@@ -95,6 +98,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   // Handle city selection
   const handleCitySelect = (selectedCity: string) => {
+    setError(null);
     if (selectedCity === '__CUSTOM__') {
       setIsCustomCity(true);
       setCity('');
@@ -106,6 +110,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   // Handle category selection
   const handleCategorySelect = (selectedCat: string) => {
+    setError(null);
     if (selectedCat === '__CUSTOM__') {
       setIsCustomCategory(true);
       setCategory('');
@@ -193,9 +198,32 @@ export const SearchView: React.FC<SearchViewProps> = ({
         <div className="lg:col-span-2 space-y-6">
           <form onSubmit={handleSubmit} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 space-y-5">
             {error && (
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{error}</span>
+              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  <span>{error}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleSubmit(e);
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-medium text-[11px] transition-colors"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Retry Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setError(null)}
+                    className="p-1 rounded hover:bg-rose-500/20 text-rose-400 hover:text-rose-200 transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 

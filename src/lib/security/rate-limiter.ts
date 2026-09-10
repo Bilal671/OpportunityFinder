@@ -14,7 +14,7 @@ export const RATE_LIMITS: Record<string, RateLimitConfig> = {
   auth_signup: { maxRequests: 5, windowMs: 60 * 1000 }, // 5 per minute
   auth_signin: { maxRequests: 10, windowMs: 60 * 1000 }, // 10 per minute
   auth_reset: { maxRequests: 3, windowMs: 60 * 1000 }, // 3 per minute
-  search: { maxRequests: 20, windowMs: 60 * 1000 }, // 20 per minute
+  search: { maxRequests: 120, windowMs: 60 * 1000 }, // 120 per minute
   audit: { maxRequests: 30, windowMs: 60 * 1000 }, // 30 per minute
   export_csv: { maxRequests: 10, windowMs: 60 * 1000 }, // 10 per minute
   ai_analysis: { maxRequests: 15, windowMs: 60 * 1000 }, // 15 per minute
