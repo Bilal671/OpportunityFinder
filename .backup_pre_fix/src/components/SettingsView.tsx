@@ -10,7 +10,6 @@ import {
   Layers,
 } from 'lucide-react';
 import { UsageQuota } from '../types';
-import { apiFetch } from '../lib/api-client';
 
 export const SettingsView: React.FC = () => {
   const [quota, setQuota] = useState<UsageQuota | null>(null);
@@ -23,17 +22,13 @@ export const SettingsView: React.FC = () => {
   } | null>(null);
 
   useEffect(() => {
-    apiFetch<{ quota: UsageQuota }>('/api/quota')
+    fetch('/api/quota')
+      .then((res) => res.json())
       .then((data) => setQuota(data.quota))
       .catch(() => {});
 
-    apiFetch<{
-      geminiConfigured: boolean;
-      pageSpeedConfigured: boolean;
-      googleMapsConfigured: boolean;
-      turnstileConfigured: boolean;
-      providers: Array<{ id: string; name: string; description: string; isConfigured: boolean }>;
-    }>('/api/config')
+    fetch('/api/config')
+      .then((res) => res.json())
       .then((data) => setConfig(data))
       .catch(() => {});
   }, []);

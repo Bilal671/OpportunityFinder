@@ -8,7 +8,6 @@ import { SettingsView } from './components/SettingsView';
 import { BusinessDetailModal } from './components/BusinessDetailModal';
 import { ManualEntryModal } from './components/ManualEntryModal';
 import { CsvImportModal } from './components/CsvImportModal';
-import { apiFetch } from './lib/api-client';
 import {
   Business,
   Audit,
@@ -55,8 +54,11 @@ export default function App() {
   // Fetch Businesses
   const fetchBusinesses = useCallback(async () => {
     try {
-      const data = await apiFetch<{ businesses: BusinessWithMeta[] }>('/api/businesses');
-      setBusinesses(data.businesses || []);
+      const res = await fetch('/api/businesses');
+      if (res.ok) {
+        const data = await res.json();
+        setBusinesses(data.businesses || []);
+      }
     } catch (err) {
       console.error('Failed to load businesses:', err);
     }
@@ -65,14 +67,17 @@ export default function App() {
   // Fetch Searches
   const fetchSearches = useCallback(async () => {
     try {
-      const data = await apiFetch<{ searches: SearchRecord[] }>('/api/searches');
-      const list: SearchRecord[] = data.searches || [];
-      setSearches(list);
+      const res = await fetch('/api/searches');
+      if (res.ok) {
+        const data = await res.json();
+        const list: SearchRecord[] = data.searches || [];
+        setSearches(list);
 
-      // Check for active processing search
-      const active = list.find((s) => s.status === 'PROCESSING');
-      if (active) {
-        setActiveSearch(active);
+        // Check for active processing search
+        const active = list.find((s) => s.status === 'PROCESSING');
+        if (active) {
+          setActiveSearch(active);
+        }
       }
     } catch (err) {
       console.error('Failed to load searches:', err);
@@ -92,13 +97,16 @@ export default function App() {
 
     const interval = setInterval(async () => {
       try {
-        const data = await apiFetch<{ search: SearchRecord }>(`/api/searches/${activeSearch.id}`, {}, { maxRetries: 1 });
-        const updated: SearchRecord = data.search;
-        setActiveSearch(updated);
+        const res = await fetch(`/api/searches/${activeSearch.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          const updated: SearchRecord = data.search;
+          setActiveSearch(updated);
 
-        if (updated.status === 'COMPLETED' || updated.status === 'FAILED') {
-          fetchBusinesses();
-          fetchSearches();
+          if (updated.status === 'COMPLETED' || updated.status === 'FAILED') {
+            fetchBusinesses();
+            fetchSearches();
+          }
         }
       } catch {
         // Ignore polling error
@@ -118,20 +126,18 @@ export default function App() {
     minOpportunityScore: number;
     provider: string;
   }): Promise<SearchRecord> => {
-    const data = await apiFetch<{ search: SearchRecord }>(
-      '/api/searches',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      },
-      {
-        maxRetries: 4,
-        baseDelayMs: 800,
-        autoWaitForWarmup: true,
-      }
-    );
+    const res = await fetch('/api/searches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
 
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error?.message || 'Failed to start search');
+    }
+
+    const data = await res.json();
     const searchRecord: SearchRecord = data.search;
     setActiveSearch(searchRecord);
     fetchSearches();
@@ -141,8 +147,11 @@ export default function App() {
   // Select a business to view Dossier Modal
   const handleSelectBusiness = async (businessId: string) => {
     try {
-      const data = await apiFetch(`/api/businesses/${businessId}`);
-      setSelectedBusinessDetail(data);
+      const res = await fetch(`/api/businesses/${businessId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedBusinessDetail(data);
+      }
     } catch (err) {
       console.error('Failed to load business details:', err);
     }
@@ -151,18 +160,20 @@ export default function App() {
   // Update Lead Status
   const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
     try {
-      await apiFetch(`/api/leads/${leadId}`, {
+      const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
 
-      fetchBusinesses();
-      if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
-        setSelectedBusinessDetail({
-          ...selectedBusinessDetail,
-          lead: { ...selectedBusinessDetail.lead, status },
-        });
+      if (res.ok) {
+        fetchBusinesses();
+        if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
+          setSelectedBusinessDetail({
+            ...selectedBusinessDetail,
+            lead: { ...selectedBusinessDetail.lead, status },
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to update lead status:', err);
@@ -172,18 +183,20 @@ export default function App() {
   // Update Lead Details (Notes, follow-up date)
   const handleUpdateLead = async (leadId: string, updates: Partial<Lead>) => {
     try {
-      await apiFetch(`/api/leads/${leadId}`, {
+      const res = await fetch(`/api/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
 
-      fetchBusinesses();
-      if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
-        setSelectedBusinessDetail({
-          ...selectedBusinessDetail,
-          lead: { ...selectedBusinessDetail.lead, ...updates },
-        });
+      if (res.ok) {
+        fetchBusinesses();
+        if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
+          setSelectedBusinessDetail({
+            ...selectedBusinessDetail,
+            lead: { ...selectedBusinessDetail.lead, ...updates },
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to update lead details:', err);
@@ -193,7 +206,7 @@ export default function App() {
   // Suppress Business (DO_NOT_CONTACT)
   const handleSuppressBusiness = async (businessId: string) => {
     try {
-      await apiFetch(`/api/businesses/${businessId}/suppress`, { method: 'POST' });
+      await fetch(`/api/businesses/${businessId}/suppress`, { method: 'POST' });
       fetchBusinesses();
       setSelectedBusinessDetail(null);
     } catch (err) {
@@ -204,7 +217,7 @@ export default function App() {
   // Delete Business
   const handleDeleteBusiness = async (businessId: string) => {
     try {
-      await apiFetch(`/api/businesses/${businessId}`, { method: 'DELETE' });
+      await fetch(`/api/businesses/${businessId}`, { method: 'DELETE' });
       fetchBusinesses();
       setSelectedBusinessDetail(null);
     } catch (err) {
@@ -215,12 +228,14 @@ export default function App() {
   // Bulk Lead Status Update
   const handleBulkUpdateStatus = async (businessIds: string[], status: LeadStatus) => {
     try {
-      await apiFetch('/api/leads/bulk-status', {
+      const res = await fetch('/api/leads/bulk-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businessIds, status }),
       });
-      await fetchBusinesses();
+      if (res.ok) {
+        await fetchBusinesses();
+      }
     } catch (err) {
       console.error('Failed to bulk update status:', err);
     }
@@ -229,12 +244,14 @@ export default function App() {
   // Bulk Suppress Businesses
   const handleBulkSuppress = async (businessIds: string[]) => {
     try {
-      await apiFetch('/api/businesses/bulk-suppress', {
+      const res = await fetch('/api/businesses/bulk-suppress', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businessIds }),
       });
-      await fetchBusinesses();
+      if (res.ok) {
+        await fetchBusinesses();
+      }
     } catch (err) {
       console.error('Failed to bulk suppress businesses:', err);
     }
@@ -243,12 +260,14 @@ export default function App() {
   // Bulk Delete Businesses
   const handleBulkDelete = async (businessIds: string[]) => {
     try {
-      await apiFetch('/api/businesses/bulk-delete', {
+      const res = await fetch('/api/businesses/bulk-delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businessIds }),
       });
-      await fetchBusinesses();
+      if (res.ok) {
+        await fetchBusinesses();
+      }
     } catch (err) {
       console.error('Failed to bulk delete businesses:', err);
     }
@@ -257,12 +276,14 @@ export default function App() {
   // Bulk Add Tag
   const handleBulkAddTag = async (businessIds: string[], tag: string) => {
     try {
-      await apiFetch('/api/leads/bulk-tags', {
+      const res = await fetch('/api/leads/bulk-tags', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ businessIds, tag }),
       });
-      await fetchBusinesses();
+      if (res.ok) {
+        await fetchBusinesses();
+      }
     } catch (err) {
       console.error('Failed to bulk add tag:', err);
     }
@@ -278,23 +299,34 @@ export default function App() {
     websiteUrl?: string;
     phone?: string;
   }) => {
-    await apiFetch('/api/businesses', {
+    const res = await fetch('/api/businesses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error?.message || 'Failed to save business');
+    }
 
     await fetchBusinesses();
   };
 
   // CSV Import
   const handleCsvImport = async (csvText: string): Promise<number> => {
-    const data = await apiFetch<{ importedCount: number }>('/api/import/csv', {
+    const res = await fetch('/api/import/csv', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ csvText }),
     });
 
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error?.message || 'CSV Import failed');
+    }
+
+    const data = await res.json();
     await fetchBusinesses();
     return data.importedCount;
   };
