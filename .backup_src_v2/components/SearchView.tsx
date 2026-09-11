@@ -14,8 +14,11 @@ import {
   Layers,
   Edit3,
   ListFilter,
+  RotateCw,
+  X,
 } from 'lucide-react';
 import { SearchRecord, SearchStage } from '../types';
+import { checkBackendHealth, waitForBackendReady } from '../lib/api-client';
 import {
   INDUSTRY_CATEGORY_GROUPS,
   ALL_PREDEFINED_CATEGORIES,
@@ -62,6 +65,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [minOpportunityScore, setMinOpportunityScore] = useState(60);
   const [provider, setProvider] = useState('licensed');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Available cities dynamically derived from country selection
@@ -115,8 +119,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
     setCategory(selectedCat);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSearchSubmission = async () => {
     const cleanCountry = country.trim();
     const cleanCity = city.trim();
     const cleanCat = category.trim();
@@ -147,12 +150,63 @@ export const SearchView: React.FC<SearchViewProps> = ({
         minOpportunityScore,
         provider,
       });
+      setError(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to launch search');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await executeSearchSubmission();
+  };
+
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    try {
+      // First wait for backend health check to confirm server readiness
+      await waitForBackendReady(8000, 750);
+      await executeSearchSubmission();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to launch search');
+    } finally {
+      setIsRetrying(false);
+    }
+  };
+
+  // Background auto-retry when service warm-up is detected
+  useEffect(() => {
+    if (!error) return;
+    const isWarmup =
+      error.toLowerCase().includes('warming up') ||
+      error.toLowerCase().includes('warmup') ||
+      error.toLowerCase().includes('starting');
+
+    if (!isWarmup) return;
+
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      if (isCancelled || isSubmitting || isRetrying) return;
+      const isHealthy = await checkBackendHealth(2500);
+      if (isHealthy && !isCancelled) {
+        setIsRetrying(true);
+        try {
+          await executeSearchSubmission();
+        } catch {
+          // If still failing, keep error for manual retry
+        } finally {
+          if (!isCancelled) setIsRetrying(false);
+        }
+      }
+    }, 2500);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [error, isSubmitting, isRetrying]);
 
   const STAGES: { id: SearchStage; label: string; desc: string }[] = [
     { id: 'DISCOVERY', label: 'Discovery', desc: 'Querying compliant provider registry' },
@@ -193,9 +247,72 @@ export const SearchView: React.FC<SearchViewProps> = ({
         <div className="lg:col-span-2 space-y-6">
           <form onSubmit={handleSubmit} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 space-y-5">
             {error && (
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300 flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                <span>{error}</span>
+              <div
+                className={`rounded-lg border p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                  error.toLowerCase().includes('warmup') ||
+                  error.toLowerCase().includes('warming up') ||
+                  error.toLowerCase().includes('starting')
+                    ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                    : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  {isRetrying ? (
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-amber-400" />
+                  ) : (
+                    <AlertCircle
+                      className={`h-4 w-4 shrink-0 ${
+                        error.toLowerCase().includes('warmup') ||
+                        error.toLowerCase().includes('warming up')
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }`}
+                    />
+                  )}
+                  <div>
+                    <span className="font-medium">
+                      {isRetrying
+                        ? 'Connecting to discovery engine...'
+                        : error}
+                    </span>
+                    {(error.toLowerCase().includes('warmup') ||
+                      error.toLowerCase().includes('warming up')) &&
+                      !isRetrying && (
+                        <p className="text-[11px] text-amber-300/80 mt-0.5">
+                          Auto-reconnecting in background, or click Retry Now.
+                        </p>
+                      )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  <button
+                    type="button"
+                    disabled={isSubmitting || isRetrying}
+                    onClick={handleRetry}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white font-medium text-[11px] transition-colors border border-zinc-700 disabled:opacity-50"
+                  >
+                    {isRetrying ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin text-indigo-400" />
+                        Connecting...
+                      </>
+                    ) : (
+                      <>
+                        <RotateCw className="h-3 w-3 text-indigo-400" />
+                        Retry Now
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setError(null)}
+                    className="p-1 rounded hover:bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 transition-colors"
+                    title="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 

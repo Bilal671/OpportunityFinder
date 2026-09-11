@@ -745,6 +745,18 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 })}
               </div>
 
+              {activeSearch.status === 'FAILED' && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-300 space-y-2">
+                  <div className="font-semibold text-rose-200 flex items-center gap-1.5">
+                    <AlertCircle className="h-4 w-4 text-rose-400" />
+                    Scan Processing Alert
+                  </div>
+                  <div className="text-zinc-300 text-[11px] leading-relaxed">
+                    {activeSearch.errorMessage || 'An error occurred while executing the search pipeline. Please try running the search again.'}
+                  </div>
+                </div>
+              )}
+
               {activeSearch.status === 'COMPLETED' && (
                 <div className="pt-3 border-t border-zinc-800 flex justify-end">
                   <button

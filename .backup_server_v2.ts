@@ -34,7 +34,8 @@ function getAuthContext(req: Request) {
 // 1. HEALTH & SYSTEM CONFIG ENDPOINTS
 // -------------------------------------------------------------
 app.get('/api/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 app.get('/api/config', (req: Request, res: Response) => {
@@ -588,7 +589,45 @@ app.post('/api/security/run-tests', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
-// 9. VITE SPA MIDDLEWARE FOR SERVING FRONTEND
+// 9. API FALLBACK & ERROR HANDLING MIDDLEWARE
+// -------------------------------------------------------------
+// Explicit 404 handler for undefined /api/* routes to avoid falling through to SPA HTML
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({
+    error: {
+      code: 'NOT_FOUND',
+      message: `API endpoint ${req.method} ${req.path} not found`,
+    },
+  });
+});
+
+// Global Express error handler for API routes
+app.use((err: any, req: Request, res: Response, next: any) => {
+  console.error('Unhandled server error on path:', req.path, err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  const status = typeof err?.status === 'number' ? err.status : 500;
+  const message = err?.message || 'An unexpected server error occurred. Please try again.';
+  res.status(status).json({
+    error: {
+      code: err?.code || 'INTERNAL_ERROR',
+      message,
+    },
+  });
+});
+
+// Safety handlers for uncaught process exceptions
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception in server process:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection in server process:', reason);
+});
+
+// -------------------------------------------------------------
+// 10. VITE SPA MIDDLEWARE FOR SERVING FRONTEND
 // -------------------------------------------------------------
 async function start() {
   if (process.env.NODE_ENV !== 'production') {

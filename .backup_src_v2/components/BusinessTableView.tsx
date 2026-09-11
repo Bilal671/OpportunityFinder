@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Business, Audit, Lead, LeadStatus, WebsiteStatus } from '../types';
+import { apiFetch } from '../lib/api-client';
 
 interface BusinessTableViewProps {
   businesses: Array<
@@ -213,12 +214,11 @@ export const BusinessTableView: React.FC<BusinessTableViewProps> = ({
       if (onBulkUpdateStatus) {
         await onBulkUpdateStatus(ids, status);
       } else {
-        const res = await fetch('/api/leads/bulk-status', {
+        await apiFetch('/api/leads/bulk-status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ businessIds: ids, status }),
         });
-        if (!res.ok) throw new Error('Failed to update lead statuses');
       }
 
       showNotification(
@@ -244,12 +244,11 @@ export const BusinessTableView: React.FC<BusinessTableViewProps> = ({
       if (onBulkAddTag) {
         await onBulkAddTag(ids, cleanTag);
       } else {
-        const res = await fetch('/api/leads/bulk-tags', {
+        await apiFetch('/api/leads/bulk-tags', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ businessIds: ids, tag: cleanTag }),
         });
-        if (!res.ok) throw new Error('Failed to add tag to leads');
       }
 
       setCustomTagInput('');
@@ -272,12 +271,11 @@ export const BusinessTableView: React.FC<BusinessTableViewProps> = ({
       if (onBulkSuppress) {
         await onBulkSuppress(ids);
       } else {
-        const res = await fetch('/api/businesses/bulk-suppress', {
+        await apiFetch('/api/businesses/bulk-suppress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ businessIds: ids }),
         });
-        if (!res.ok) throw new Error('Failed to suppress businesses');
       }
 
       handleClearSelection();
@@ -299,12 +297,11 @@ export const BusinessTableView: React.FC<BusinessTableViewProps> = ({
       if (onBulkDelete) {
         await onBulkDelete(ids);
       } else {
-        const res = await fetch('/api/businesses/bulk-delete', {
+        await apiFetch('/api/businesses/bulk-delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ businessIds: ids }),
         });
-        if (!res.ok) throw new Error('Failed to delete businesses');
       }
 
       handleClearSelection();

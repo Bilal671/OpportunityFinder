@@ -12,6 +12,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { SecurityEvent } from '../types';
+import { apiFetch } from '../lib/api-client';
 
 export const SecuritySuiteView: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false);
@@ -27,11 +28,8 @@ export const SecuritySuiteView: React.FC = () => {
   const loadEvents = async () => {
     setIsLoadingEvents(true);
     try {
-      const res = await fetch('/api/security/events');
-      if (res.ok) {
-        const data = await res.json();
-        setSecurityEvents(data.events || []);
-      }
+      const data = await apiFetch<{ events: SecurityEvent[] }>('/api/security/events');
+      setSecurityEvents(data.events || []);
     } catch {
       // Ignore
     } finally {
@@ -46,11 +44,8 @@ export const SecuritySuiteView: React.FC = () => {
   const runSecurityTests = async () => {
     setIsRunning(true);
     try {
-      const res = await fetch('/api/security/run-tests', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        setTestResults(data);
-      }
+      const data = await apiFetch('/api/security/run-tests', { method: 'POST' });
+      setTestResults(data);
     } catch (err: unknown) {
       console.error('Failed to run security tests:', err);
     } finally {
