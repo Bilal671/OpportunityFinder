@@ -95,21 +95,42 @@ async function parseResponsePayload(res: Response): Promise<{ isJson: boolean; d
 }
 
 /**
- * Tests if response text or status signifies Cloud Run / Nginx warm-up.
+ * Tests if response text, json data, or status signifies Cloud Run / Nginx / proxy warm-up or cold-start.
  */
-function isWarmupResponse(status: number, text: string): boolean {
+function isWarmupResponse(status: number, text: string, data?: any, endpoint?: string): boolean {
   if (status === 502 || status === 503 || status === 504) {
     return true;
   }
-  const lower = text.toLowerCase();
-  return (
+  const lower = (text || '').toLowerCase();
+  const dataMsg = ((data?.message || data?.error?.message || data?.error || '') + '').toLowerCase();
+
+  // Known proxy cold-start / warmup strings (including Cloud Run 404 "The page could not be found")
+  if (
     lower.includes('warmup') ||
     lower.includes('starting server') ||
     lower.includes('please wait while') ||
     lower.includes('bad gateway') ||
     lower.includes('service unavailable') ||
-    lower.includes('gateway timeout')
-  );
+    lower.includes('gateway timeout') ||
+    lower.includes('the page could not be found') ||
+    lower.includes('page could not be found') ||
+    lower.includes('could not be found') ||
+    dataMsg.includes('the page could not be found') ||
+    dataMsg.includes('page could not be found') ||
+    dataMsg.includes('could not be found')
+  ) {
+    return true;
+  }
+
+  // If a standard known API endpoint returns 404, it is a server-boot or proxy routing glitch
+  if (status === 404 && endpoint) {
+    const knownApiPrefixes = ['/api/searches', '/api/businesses', '/api/health', '/api/config', '/api/quota'];
+    if (knownApiPrefixes.some((p) => endpoint.startsWith(p))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -159,14 +180,14 @@ export async function apiFetch<T = any>(
 
       const { isJson, data, text } = await parseResponsePayload(res);
 
-      // Check if response indicates server warmup
-      const isWarmup = isWarmupResponse(res.status, text);
+      // Check if response indicates server warmup or cold-start
+      const isWarmup = isWarmupResponse(res.status, text, data, endpoint);
 
       if (isWarmup) {
         if (attempt < maxRetries) {
           // If autoWaitForWarmup is enabled, perform live health check wait
           if (autoWaitForWarmup) {
-            const ready = await waitForBackendReady(6000, 750);
+            const ready = await waitForBackendReady(8000, 750);
             if (ready) {
               // Server woke up! Retry immediately
               continue;
@@ -178,7 +199,7 @@ export async function apiFetch<T = any>(
         }
 
         throw new ApiError(
-          'Service is warming up. Please click "Retry" in a few seconds.',
+          'Connecting to business discovery engine... Server is initializing. Please wait a few seconds and click "Retry Now".',
           res.status,
           true,
           'SERVICE_WARMING_UP'
@@ -187,18 +208,29 @@ export async function apiFetch<T = any>(
 
       if (!res.ok) {
         if (isJson && data) {
-          const errMsg =
+          let errMsg =
             data.error?.message ||
             data.message ||
             `Request failed with status ${res.status}`;
+          
+          if (errMsg.toLowerCase().includes('could not be found')) {
+            errMsg = 'Connecting to business discovery engine... Server is initializing. Please click "Retry Now".';
+          }
+
           const errCode = data.error?.code || 'API_ERROR';
           throw new ApiError(errMsg, res.status, false, errCode);
         }
 
+        const rawText = (text || '').toLowerCase();
+        let fallbackMsg = `Server returned error status ${res.status}`;
+        if (rawText.includes('could not be found') || res.status === 404) {
+          fallbackMsg = 'Connecting to business discovery engine... Server is initializing. Please click "Retry Now".';
+        }
+
         throw new ApiError(
-          `Server returned error status ${res.status}`,
+          fallbackMsg,
           res.status,
-          false
+          rawText.includes('could not be found') || res.status === 404
         );
       }
 

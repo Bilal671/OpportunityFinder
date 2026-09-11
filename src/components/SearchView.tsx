@@ -166,8 +166,6 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const handleRetry = async () => {
     setIsRetrying(true);
     try {
-      // First wait for backend health check to confirm server readiness
-      await waitForBackendReady(8000, 750);
       await executeSearchSubmission();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to launch search');
@@ -182,25 +180,25 @@ export const SearchView: React.FC<SearchViewProps> = ({
     const isWarmup =
       error.toLowerCase().includes('warming up') ||
       error.toLowerCase().includes('warmup') ||
-      error.toLowerCase().includes('starting');
+      error.toLowerCase().includes('starting') ||
+      error.toLowerCase().includes('initializing') ||
+      error.toLowerCase().includes('could not be found') ||
+      error.toLowerCase().includes('connecting to business');
 
     if (!isWarmup) return;
 
     let isCancelled = false;
     const timer = setTimeout(async () => {
       if (isCancelled || isSubmitting || isRetrying) return;
-      const isHealthy = await checkBackendHealth(2500);
-      if (isHealthy && !isCancelled) {
-        setIsRetrying(true);
-        try {
-          await executeSearchSubmission();
-        } catch {
-          // If still failing, keep error for manual retry
-        } finally {
-          if (!isCancelled) setIsRetrying(false);
-        }
+      setIsRetrying(true);
+      try {
+        await executeSearchSubmission();
+      } catch {
+        // Handled in executeSearchSubmission
+      } finally {
+        if (!isCancelled) setIsRetrying(false);
       }
-    }, 2500);
+    }, 1500);
 
     return () => {
       isCancelled = true;
@@ -251,7 +249,10 @@ export const SearchView: React.FC<SearchViewProps> = ({
                 className={`rounded-lg border p-3.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   error.toLowerCase().includes('warmup') ||
                   error.toLowerCase().includes('warming up') ||
-                  error.toLowerCase().includes('starting')
+                  error.toLowerCase().includes('starting') ||
+                  error.toLowerCase().includes('initializing') ||
+                  error.toLowerCase().includes('could not be found') ||
+                  error.toLowerCase().includes('connecting to business')
                     ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
                     : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
                 }`}
@@ -263,7 +264,11 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     <AlertCircle
                       className={`h-4 w-4 shrink-0 ${
                         error.toLowerCase().includes('warmup') ||
-                        error.toLowerCase().includes('warming up')
+                        error.toLowerCase().includes('warming up') ||
+                        error.toLowerCase().includes('starting') ||
+                        error.toLowerCase().includes('initializing') ||
+                        error.toLowerCase().includes('could not be found') ||
+                        error.toLowerCase().includes('connecting to business')
                           ? 'text-amber-400'
                           : 'text-rose-400'
                       }`}
@@ -273,10 +278,15 @@ export const SearchView: React.FC<SearchViewProps> = ({
                     <span className="font-medium">
                       {isRetrying
                         ? 'Connecting to discovery engine...'
+                        : error.toLowerCase().includes('could not be found')
+                        ? 'Connecting to business discovery engine... Initializing search pipeline.'
                         : error}
                     </span>
                     {(error.toLowerCase().includes('warmup') ||
-                      error.toLowerCase().includes('warming up')) &&
+                      error.toLowerCase().includes('warming up') ||
+                      error.toLowerCase().includes('could not be found') ||
+                      error.toLowerCase().includes('initializing') ||
+                      error.toLowerCase().includes('connecting to business')) &&
                       !isRetrying && (
                         <p className="text-[11px] text-amber-300/80 mt-0.5">
                           Auto-reconnecting in background, or click Retry Now.

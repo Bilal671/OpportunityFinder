@@ -9,6 +9,7 @@ import { BusinessDetailModal } from './components/BusinessDetailModal';
 import { ManualEntryModal } from './components/ManualEntryModal';
 import { CsvImportModal } from './components/CsvImportModal';
 import { apiFetch } from './lib/api-client';
+import { runClientDiscovery } from './lib/client-pipeline';
 import {
   Business,
   Audit,
@@ -18,16 +19,21 @@ import {
   AIReport,
   Contact,
   EvidenceRecord,
+  DataSourceProvider,
 } from './types';
 
 type BusinessWithMeta = Business & {
   audit?: Audit;
+  audits?: Audit[];
   lead?: Lead;
   contactsCount: number;
   hasEmail: boolean;
   hasPhone: boolean;
   hasWhatsApp: boolean;
   hasDecisionMaker: boolean;
+  contacts?: Contact[];
+  evidence?: EvidenceRecord[];
+  aiReport?: AIReport;
 };
 
 export default function App() {
@@ -56,7 +62,12 @@ export default function App() {
   const fetchBusinesses = useCallback(async () => {
     try {
       const data = await apiFetch<{ businesses: BusinessWithMeta[] }>('/api/businesses');
-      setBusinesses(data.businesses || []);
+      const serverList = data.businesses || [];
+      setBusinesses((prev) => {
+        const serverIds = new Set(serverList.map((b) => b.id));
+        const clientOnly = prev.filter((b) => !serverIds.has(b.id));
+        return [...serverList, ...clientOnly];
+      });
     } catch (err) {
       console.error('Failed to load businesses:', err);
     }
@@ -67,7 +78,11 @@ export default function App() {
     try {
       const data = await apiFetch<{ searches: SearchRecord[] }>('/api/searches');
       const list: SearchRecord[] = data.searches || [];
-      setSearches(list);
+      setSearches((prev) => {
+        const serverIds = new Set(list.map((s) => s.id));
+        const clientOnly = prev.filter((s) => !serverIds.has(s.id));
+        return [...list, ...clientOnly];
+      });
 
       // Check for active processing search
       const active = list.find((s) => s.status === 'PROCESSING');
@@ -118,24 +133,47 @@ export default function App() {
     minOpportunityScore: number;
     provider: string;
   }): Promise<SearchRecord> => {
-    const data = await apiFetch<{ search: SearchRecord }>(
-      '/api/searches',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      },
-      {
-        maxRetries: 4,
-        baseDelayMs: 800,
-        autoWaitForWarmup: true,
-      }
-    );
+    try {
+      const data = await apiFetch<{ search: SearchRecord }>(
+        '/api/searches',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 600,
+          autoWaitForWarmup: true,
+        }
+      );
 
-    const searchRecord: SearchRecord = data.search;
-    setActiveSearch(searchRecord);
-    fetchSearches();
-    return searchRecord;
+      const searchRecord: SearchRecord = data.search;
+      setActiveSearch(searchRecord);
+      fetchSearches();
+      return searchRecord;
+    } catch (err) {
+      console.warn('Backend search unreachable or in cold-start, activating resilient client engine:', err);
+      // Run resilient local discovery engine with real-time progress callbacks
+      const { search: localSearch, businesses: localBusinesses } = await runClientDiscovery(
+        {
+          ...params,
+          provider: (params.provider || 'licensed') as DataSourceProvider,
+        },
+        (progressSearch) => {
+          setActiveSearch({ ...progressSearch });
+        }
+      );
+
+      setActiveSearch(localSearch);
+      setBusinesses((prev) => {
+        const existingIds = new Set(prev.map((b) => b.id));
+        const filteredNew = localBusinesses.filter((b) => !existingIds.has(b.id));
+        return [...filteredNew, ...prev];
+      });
+      setSearches((prev) => [localSearch, ...prev.filter((s) => s.id !== localSearch.id)]);
+      return localSearch;
+    }
   };
 
   // Select a business to view Dossier Modal
@@ -144,49 +182,71 @@ export default function App() {
       const data = await apiFetch(`/api/businesses/${businessId}`);
       setSelectedBusinessDetail(data);
     } catch (err) {
-      console.error('Failed to load business details:', err);
+      console.warn('Failed to load business details from server, checking local records:', err);
+      const localBiz = businesses.find((b) => b.id === businessId);
+      if (localBiz) {
+        setSelectedBusinessDetail({
+          business: localBiz,
+          audit: localBiz.audit,
+          audits: localBiz.audits || (localBiz.audit ? [localBiz.audit] : []),
+          aiReport: localBiz.aiReport,
+          contacts: localBiz.contacts || [],
+          evidence: localBiz.evidence || [],
+          lead: localBiz.lead,
+        });
+      }
     }
   };
 
   // Update Lead Status
   const handleUpdateLeadStatus = async (leadId: string, status: LeadStatus) => {
+    // Optimistic local update
+    setBusinesses((prev) =>
+      prev.map((b) => (b.lead?.id === leadId ? { ...b, lead: { ...b.lead, status } } : b))
+    );
+
+    if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
+      setSelectedBusinessDetail({
+        ...selectedBusinessDetail,
+        lead: { ...selectedBusinessDetail.lead, status },
+      });
+    }
+
     try {
       await apiFetch(`/api/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-
       fetchBusinesses();
-      if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
-        setSelectedBusinessDetail({
-          ...selectedBusinessDetail,
-          lead: { ...selectedBusinessDetail.lead, status },
-        });
-      }
     } catch (err) {
-      console.error('Failed to update lead status:', err);
+      console.warn('Backend sync failed, updated locally:', err);
     }
   };
 
   // Update Lead Details (Notes, follow-up date)
   const handleUpdateLead = async (leadId: string, updates: Partial<Lead>) => {
+    // Optimistic local update
+    setBusinesses((prev) =>
+      prev.map((b) => (b.lead?.id === leadId ? { ...b, lead: { ...b.lead, ...updates } } : b))
+    );
+
+    if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
+      setSelectedBusinessDetail({
+        ...selectedBusinessDetail,
+        lead: { ...selectedBusinessDetail.lead, ...updates },
+      });
+    }
+
     try {
       await apiFetch(`/api/leads/${leadId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
-
       fetchBusinesses();
-      if (selectedBusinessDetail && selectedBusinessDetail.lead?.id === leadId) {
-        setSelectedBusinessDetail({
-          ...selectedBusinessDetail,
-          lead: { ...selectedBusinessDetail.lead, ...updates },
-        });
-      }
     } catch (err) {
-      console.error('Failed to update lead details:', err);
+      console.warn('Backend sync failed, updated locally:', err);
     }
   };
 

@@ -217,6 +217,8 @@ export interface Lead {
   updatedAt: string;
 }
 
+export type DataSourceProvider = 'licensed' | 'open_data' | 'user_csv' | 'manual' | 'google_places_official';
+
 export interface SearchParams {
   country: string;
   city: string;
@@ -224,7 +226,7 @@ export interface SearchParams {
   category: string;
   keywords?: string;
   minOpportunityScore?: number;
-  provider?: 'licensed' | 'open_data' | 'user_csv' | 'manual' | 'google_places_official';
+  provider?: DataSourceProvider;
 }
 
 export type SearchStage =
