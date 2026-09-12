@@ -1,4 +1,7 @@
 import { SearchParams, DiscoveredBusiness } from '../../types';
+import { ApifyGoogleMapsProvider } from './apify-provider';
+
+export { ApifyGoogleMapsProvider };
 
 export interface DiscoveryProvider {
   id: string;
@@ -132,23 +135,126 @@ export class LicensedBusinessDataProvider implements DiscoveryProvider {
 }
 
 /**
+ * Helper to match category string with appropriate OpenStreetMap amenity/shop/craft tag
+ */
+function getOsmTagFilter(category: string): string {
+  const cat = (category || '').toLowerCase();
+  if (cat.includes('dentist') || cat.includes('zahnarzt')) return 'node["amenity"="dentist"]';
+  if (cat.includes('doctor') || cat.includes('arzt') || cat.includes('clinic')) return 'node["amenity"~"doctors|clinic"]';
+  if (cat.includes('restaurant') || cat.includes('dining')) return 'node["amenity"="restaurant"]';
+  if (cat.includes('cafe') || cat.includes('coffee') || cat.includes('bakery')) return 'node["amenity"~"cafe|bakery"]';
+  if (cat.includes('lawyer') || cat.includes('legal') || cat.includes('anwalt')) return 'node["office"~"lawyer|notary"]';
+  if (cat.includes('tax') || cat.includes('accountant') || cat.includes('steuer')) return 'node["office"="tax_advisor"]';
+  if (cat.includes('hair') || cat.includes('barber') || cat.includes('friseur')) return 'node["shop"="hairdresser"]';
+  if (cat.includes('gym') || cat.includes('fitness')) return 'node["leisure"="fitness_centre"]';
+  if (cat.includes('plumber') || cat.includes('electric') || cat.includes('roof') || cat.includes('contractor') || cat.includes('craft')) return 'node["craft"]';
+  if (cat.includes('pharmacy') || cat.includes('apotheke')) return 'node["amenity"="pharmacy"]';
+  if (cat.includes('hotel') || cat.includes('hostel')) return 'node["tourism"~"hotel|guest_house"]';
+  if (cat.includes('auto') || cat.includes('car') || cat.includes('kfz') || cat.includes('mechanic')) return 'node["shop"="car_repair"]';
+  return `node["name"~"${category.replace(/[^a-zA-Z0-9]/g, '')}",i]`;
+}
+
+export async function fetchOverpassLiveBusinesses(params: SearchParams): Promise<DiscoveredBusiness[]> {
+  const city = (params.city || 'Frankfurt am Main').trim();
+  const country = (params.country || 'Germany').trim();
+  const category = (params.category || 'Dentist').trim();
+  const filter = getOsmTagFilter(category);
+
+  // Search by area name with safety timeout
+  const query = `
+[out:json][timeout:10];
+area["name"="${city.replace(/"/g, '')}"]->.searchArea;
+(
+  ${filter}(area.searchArea);
+);
+out 15;
+`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'OpportunityFinder/1.0',
+      },
+      body: query,
+      signal: controller.signal,
+    });
+
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => ({}))) as { elements?: any[] };
+    const elements = data.elements || [];
+
+    const discovered: DiscoveredBusiness[] = [];
+    for (const el of elements) {
+      const tags = el.tags || {};
+      const name = tags.name;
+      if (!name) continue;
+
+      const street = [tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join(' ') || tags['addr:place'] || '';
+      const phone = tags.phone || tags['contact:phone'];
+      const rawUrl = tags.website || tags['contact:website'] || tags.url;
+
+      let websiteUrl: string | undefined = undefined;
+      if (rawUrl && typeof rawUrl === 'string' && rawUrl.trim() !== '') {
+        const u = rawUrl.trim();
+        websiteUrl = u.startsWith('http') ? u : `https://${u}`;
+      }
+
+      discovered.push({
+        name: name.trim(),
+        category,
+        street: street.trim(),
+        city: tags['addr:city'] || city,
+        country: tags['addr:country'] || country,
+        latitude: el.lat,
+        longitude: el.lon,
+        phone: phone ? String(phone).trim() : undefined,
+        websiteUrl,
+        source: 'open_data',
+        sourceId: `osm_${el.id}`,
+        sourceUrl: `https://www.openstreetmap.org/node/${el.id}`,
+        confidence: 0.95,
+      });
+    }
+
+    return discovered;
+  } catch (err) {
+    console.warn('[OpenDataProvider] Live Overpass fetch failed:', err);
+    return [];
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
  * 2. OpenDataProvider:
- * Queries compliant open community geographic/amenity data (OpenStreetMap/Overpass) without scraping.
+ * Queries genuine open community geographic/amenity data (OpenStreetMap/Overpass API) live.
  */
 export class OpenDataProvider implements DiscoveryProvider {
   id = 'open_data';
-  name = 'Open Community Data Provider (OSM/OpenData)';
-  description = 'Compliant open data querying public amenity nodes and tags.';
+  name = 'Open Community Data Provider (OSM/Overpass Live)';
+  description = 'Live open community data querying registered local amenity and commercial nodes.';
 
   isConfigured(): boolean {
     return true;
   }
 
   async searchBusinesses(params: SearchParams): Promise<DiscoveredBusiness[]> {
+    const liveResults = await fetchOverpassLiveBusinesses(params);
+    if (liveResults.length > 0) {
+      console.info(`[OpenDataProvider] Found ${liveResults.length} genuine live businesses from OpenStreetMap`);
+      return liveResults;
+    }
+
+    console.info('[OpenDataProvider] Overpass returned 0 results or timed out. Using fallback candidate generator.');
     return generateDynamicCandidates(
-      params.city || 'Frankfurt',
+      params.city || 'Frankfurt am Main',
       params.country || 'Germany',
-      params.category || 'Contractor',
+      params.category || 'Dentist',
       'open_data',
       'osm'
     );
@@ -306,10 +412,11 @@ export class ProviderRegistry {
   private providers = new Map<string, DiscoveryProvider>();
 
   constructor() {
-    this.register(new LicensedBusinessDataProvider());
+    this.register(new ApifyGoogleMapsProvider());
     this.register(new OpenDataProvider());
-    this.register(new UserManualEntryProvider());
     this.register(new GooglePlacesProvider());
+    this.register(new LicensedBusinessDataProvider());
+    this.register(new UserManualEntryProvider());
     this.register(new MockDiscoveryProvider());
   }
 

@@ -27,6 +27,7 @@ interface DatabaseState {
   leads: Map<string, Lead>;
   savedSearches: Map<string, SavedSearch>;
   quotas: Map<string, UsageQuota>;
+  workspaceSettings: Map<string, Record<string, string>>;
 }
 
 // In-memory persistent state across requests
@@ -43,6 +44,7 @@ const db: DatabaseState = {
   leads: new Map(),
   savedSearches: new Map(),
   quotas: new Map(),
+  workspaceSettings: new Map(),
 };
 
 // Initialize demo seed data
@@ -1036,5 +1038,17 @@ export const store = {
     if (!s || s.workspaceId !== workspaceId) return false;
     db.savedSearches.delete(id);
     return true;
+  },
+
+  // Workspace Settings / In-app API Tokens
+  getWorkspaceSetting(workspaceId: string, key: string): string | undefined {
+    const settings = db.workspaceSettings.get(workspaceId);
+    return settings ? settings[key] : undefined;
+  },
+
+  setWorkspaceSetting(workspaceId: string, key: string, value: string): void {
+    const existing = db.workspaceSettings.get(workspaceId) || {};
+    existing[key] = value;
+    db.workspaceSettings.set(workspaceId, existing);
   },
 };

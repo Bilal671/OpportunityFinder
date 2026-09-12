@@ -16,9 +16,10 @@ import {
   ListFilter,
   RotateCw,
   X,
+  KeyRound,
 } from 'lucide-react';
 import { SearchRecord, SearchStage } from '../types';
-import { checkBackendHealth, waitForBackendReady } from '../lib/api-client';
+import { checkBackendHealth, waitForBackendReady, apiFetch } from '../lib/api-client';
 import {
   INDUSTRY_CATEGORY_GROUPS,
   ALL_PREDEFINED_CATEGORIES,
@@ -39,6 +40,7 @@ interface SearchViewProps {
     keywords?: string;
     minOpportunityScore: number;
     provider: string;
+    apifyToken?: string;
   }) => Promise<SearchRecord>;
   activeSearch: SearchRecord | null;
   recentSearches: SearchRecord[];
@@ -63,10 +65,29 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [radiusKm, setRadiusKm] = useState(20);
   const [keywords, setKeywords] = useState('');
   const [minOpportunityScore, setMinOpportunityScore] = useState(60);
-  const [provider, setProvider] = useState('licensed');
+  const [provider, setProvider] = useState('apify_google_maps');
+  const [apifyToken, setApifyToken] = useState('');
+  const [apifyConfigured, setApifyConfigured] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Check external configuration (Apify, Google Maps, Gemini)
+  useEffect(() => {
+    apiFetch<{ apifyConfigured: boolean }>('/api/config')
+      .then((cfg) => {
+        if (cfg.apifyConfigured) {
+          setApifyConfigured(true);
+          setProvider('apify_google_maps');
+        } else {
+          // If no Apify token yet, default to live OpenStreetMap Overpass (real data, free)
+          setProvider('open_data');
+        }
+      })
+      .catch(() => {
+        setProvider('open_data');
+      });
+  }, []);
 
   // Available cities dynamically derived from country selection
   const currentCities = useMemo(() => {
@@ -149,6 +170,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
         keywords: keywords.trim() ? keywords : undefined,
         minOpportunityScore,
         provider,
+        apifyToken: apifyToken.trim() ? apifyToken.trim() : undefined,
       });
       setError(null);
     } catch (err: unknown) {
@@ -593,9 +615,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
             {/* Row 3: Provider Selector & Min Opportunity */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
               <div>
-                <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center gap-1.5">
-                  <Database className="h-3.5 w-3.5 text-zinc-400" />
-                  Discovery Provider
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Database className="h-3.5 w-3.5 text-indigo-400" />
+                    Discovery Provider
+                  </span>
+                  {provider === 'apify_google_maps' && (
+                    <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      Google Maps Live
+                    </span>
+                  )}
                 </label>
                 <select
                   id="search-provider-select"
@@ -603,13 +633,48 @@ export const SearchView: React.FC<SearchViewProps> = ({
                   onChange={(e) => setProvider(e.target.value)}
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-500 focus:outline-none"
                 >
-                  <option value="licensed">Licensed Business Registry (Official/Licensed Data)</option>
-                  <option value="open_data">Open Community Data Provider (OSM/OpenData)</option>
-                  <option value="mock">Development Mock Provider (Offline Testing)</option>
-                  <option value="google_places_official">Google Places API (Official API)</option>
+                  <option value="apify_google_maps">
+                    Apify Google Maps Scraper (Live Genuine Data) ★
+                  </option>
+                  <option value="open_data">
+                    Open Community Data (OSM Overpass Live - Free, No Key)
+                  </option>
+                  <option value="google_places_official">
+                    Google Places API (Official API Key)
+                  </option>
+                  <option value="licensed">
+                    Licensed Commercial Registry
+                  </option>
+                  <option value="mock">
+                    Development Mock (Offline Testing)
+                  </option>
                 </select>
+
+                {provider === 'apify_google_maps' && !apifyConfigured && (
+                  <div className="mt-2 p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-amber-300 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <KeyRound className="h-3.5 w-3.5" />
+                        Apify API Token
+                      </span>
+                      <span className="text-[10px] text-zinc-400">Optional if set in Vercel</span>
+                    </div>
+                    <input
+                      type="password"
+                      placeholder="Paste your Apify API Token (apify_api_...)"
+                      value={apifyToken}
+                      onChange={(e) => setApifyToken(e.target.value)}
+                      className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:border-indigo-500 focus:outline-none font-mono"
+                    />
+                  </div>
+                )}
+
                 <p className="mt-1 text-[11px] text-zinc-500">
-                  Compliant data sources only. No scraping of Google Maps DOM.
+                  {provider === 'apify_google_maps'
+                    ? 'Scrapes genuine Google Maps places with real addresses, phone numbers, and websites.'
+                    : provider === 'open_data'
+                    ? 'Direct live query to OpenStreetMap Overpass. Real verified businesses, no key required.'
+                    : 'Compliant registry data.'}
                 </p>
               </div>
 

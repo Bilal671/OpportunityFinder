@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'node:path';
 import { store } from './src/lib/database/store';
@@ -84,18 +85,34 @@ apiRouter.get('/health', (req: Request, res: Response) => {
 });
 
 apiRouter.get('/config', (req: Request, res: Response) => {
+  const { workspaceId } = getAuthContext(req);
+  const apifyToken = process.env.APIFY_API_TOKEN || process.env.APIFY_API_KEY || store.getWorkspaceSetting(workspaceId, 'APIFY_API_TOKEN');
+
   res.json({
     geminiConfigured: !!process.env.GEMINI_API_KEY,
     pageSpeedConfigured: !!process.env.PAGESPEED_API_KEY,
     googleMapsConfigured: !!process.env.GOOGLE_MAPS_API_KEY,
+    apifyConfigured: !!apifyToken,
     turnstileConfigured: !!process.env.TURNSTILE_SECRET_KEY,
     providers: providerRegistry.getAll().map((p) => ({
       id: p.id,
       name: p.name,
       description: p.description,
-      isConfigured: p.isConfigured(),
+      isConfigured: p.id === 'apify_google_maps' ? !!apifyToken : p.isConfigured(),
     })),
   });
+});
+
+apiRouter.post('/config/apify-token', (req: Request, res: Response) => {
+  const { workspaceId } = getAuthContext(req);
+  const { token } = req.body;
+  if (token && typeof token === 'string' && token.trim().length > 0) {
+    const trimmed = token.trim();
+    store.setWorkspaceSetting(workspaceId, 'APIFY_API_TOKEN', trimmed);
+    process.env.APIFY_API_TOKEN = trimmed;
+    return res.json({ success: true, message: 'Apify API Token configured successfully.' });
+  }
+  return res.status(400).json({ error: { code: 'INVALID_TOKEN', message: 'Valid token string is required.' } });
 });
 
 // -------------------------------------------------------------
@@ -220,7 +237,11 @@ apiRouter.post('/searches', async (req: Request, res: Response) => {
     return res.status(429).json({ error: { code: 'RATE_LIMITED', message: 'Search rate limit reached. Please wait a moment.' } });
   }
 
-  const { country, city, radiusKm, category, keywords, minOpportunityScore, provider } = req.body;
+  const { country, city, radiusKm, category, keywords, minOpportunityScore, provider, apifyToken } = req.body;
+  if (apifyToken && typeof apifyToken === 'string' && apifyToken.trim()) {
+    store.setWorkspaceSetting(workspaceId, 'APIFY_API_TOKEN', apifyToken.trim());
+    process.env.APIFY_API_TOKEN = apifyToken.trim();
+  }
   if (!city || !category) {
     return res.status(400).json({ error: { code: 'MISSING_PARAMS', message: 'City and Category are required.' } });
   }

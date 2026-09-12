@@ -132,6 +132,7 @@ export default function App() {
     keywords?: string;
     minOpportunityScore: number;
     provider: string;
+    apifyToken?: string;
   }): Promise<SearchRecord> => {
     try {
       const data = await apiFetch<{ search: SearchRecord; businesses?: BusinessWithMeta[] }>(

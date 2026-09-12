@@ -99,7 +99,7 @@ Explain why this business is or is not losing leads, patients, or clients to mod
 Identify concrete UX, mobile, and conversion weaknesses.
 `;
 
-      const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
       const response = await ai.models.generateContent({
         model: geminiModel,

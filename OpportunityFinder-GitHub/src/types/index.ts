@@ -217,7 +217,13 @@ export interface Lead {
   updatedAt: string;
 }
 
-export type DataSourceProvider = 'licensed' | 'open_data' | 'user_csv' | 'manual' | 'google_places_official';
+export type DataSourceProvider =
+  | 'apify_google_maps'
+  | 'open_data'
+  | 'google_places_official'
+  | 'licensed'
+  | 'user_csv'
+  | 'manual';
 
 export interface SearchParams {
   country: string;
@@ -227,6 +233,7 @@ export interface SearchParams {
   keywords?: string;
   minOpportunityScore?: number;
   provider?: DataSourceProvider;
+  apifyToken?: string;
 }
 
 export type SearchStage =
